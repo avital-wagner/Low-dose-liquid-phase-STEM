@@ -12,4 +12,6 @@ For image quality assessment:
 - sources: 
 
 For STEM parameter calculations:
+- Jupyter Notebooks: theoretic_calculations.ipynb, resolution_for_thick_dose_range.ipynb
+- .py files: utils_bone.py, utils_microscope.py
 
