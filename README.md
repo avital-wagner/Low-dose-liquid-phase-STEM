@@ -11,7 +11,7 @@ For image quality assessment (file: RadarPlot_ImgMetrics_v1.1):
 - Jupyter Notebook: RadarPlot_ImgMetrics_v1.1.ipynb
 - orignal .py files: utils_bone.py, utils_microscope.py, PIQ_metrics.py, PIQ_plotting.py, PIQ_utils.py, extract_metadata.py
 - .py files from other sources: dom.py, niqe.py, piqe.py
-- sources for external files: dom.py (https://github.com/umang-singhal/pydom), niqu.py / brisque.py / piqe.py (https://github.com/EadCat/NIQA)
+- sources for external files: dom.py (https://github.com/umang-singhal/pydom), niqu.py & piqe.py (https://github.com/EadCat/NIQA)
 
 For STEM parameter calculations (file: STEM parameters):
 - Jupyter Notebooks: theoretic_calculations.ipynb, resolution_for_thick_dose_range.ipynb
