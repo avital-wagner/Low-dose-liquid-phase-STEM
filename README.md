@@ -1,7 +1,9 @@
 # Low-dose-liquid-phase-STEM
 This repository contains Python files related to the manuscript titled "Dynamic observations of collagen mineralization using low-dose liquid phase scanning transmission electron microscopy" by L. Rutten et al. It includes the Python interface for theoretical resolution calulations to determine approprate STEM imaging parameters, sub-sampled image reconstruction (with SenseAI), and image quality assessment (including Radar plots).
+If you want to make use of the codes in this repository, use the Jupyter Notebooks.
 
 For image reconstruction (file: BPFA_V1.2):
+**** You must have SenseAI enviornment on your computer to run this.
 - Jupyter Notebook: BPFA_userFriendly_V1.2.ipynb
 - .py files: bpfa_ui.py and bpfa_utils.py
 
