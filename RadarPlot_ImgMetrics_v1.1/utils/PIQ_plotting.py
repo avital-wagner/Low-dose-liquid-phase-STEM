@@ -189,7 +189,7 @@ def make_radar_plot(csv_path, output_path=None, individual_dir=None, image_col="
             fontsize=16,
         )
 
-        ax_ind.grid(True, linewidth=1.1, alpha=0.45)00
+        ax_ind.grid(True, linewidth=1.1, alpha=0.45)
         ax_ind.spines["polar"].set_alpha(0.35)
 
         # Add raw values next to the points
