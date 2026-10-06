@@ -418,11 +418,6 @@ def save_best(dir_name, best_recon, best_dict):
 # FULL ALGORITHM
 # =========================
 def perform_reconstruction(bpfa, input_array, mask_array, controls, metrics = [], scale_dict=10, scale_recon=1, only_sparse = False):
-    assert (
-        bpfa.patch_shape[0] * bpfa.patch_shape[1] == bpfa.D.shape[0] # also works for non-square dicts 
-    ), "The patch shape of the BPFA instantiation does not match the dictionary patch shape"
-
-    
     metric_vals = {name: [] for metric in metrics for name in metric.return_names()} # start with dict with empty lists
     metric_vals["residual"] = [] # hardcode for now
     steps = 0
