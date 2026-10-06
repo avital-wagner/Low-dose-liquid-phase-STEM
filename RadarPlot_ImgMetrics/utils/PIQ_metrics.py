@@ -7,9 +7,9 @@ from pathlib import Path
 from scipy.ndimage import gaussian_filter, median_filter
 
 ## own files
-from niqe import niqe as niqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
-from piqe import piqe as piqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
-from dom import DOM
+from utils.niqe import niqe as niqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
+from utils.piqe import piqe as piqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
+from utils.dom import DOM
 
 # MAIN METRIC CLASS
 class Metric():

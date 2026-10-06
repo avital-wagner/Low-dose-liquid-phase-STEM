@@ -44,7 +44,7 @@ def load_image(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     return rgb_float.astype(np.float32), alpha_mask
 
 
-def compute_metrics_for_image(path, metrics, hyperparameters):
+def compute_metrics_for_image(path, metrics):
     metric_values = {}
     
     rgb_float, _ = load_image(path)
@@ -54,7 +54,7 @@ def compute_metrics_for_image(path, metrics, hyperparameters):
     for metric in metrics:
         print("Calculating", metric.name())
 
-        dict_values = metric.compute(rgb_float, **hyperparameters)
+        dict_values = metric.compute(rgb_float)
 
         # add metric + value to dict
         metric_values.update(dict_values)
@@ -62,7 +62,7 @@ def compute_metrics_for_image(path, metrics, hyperparameters):
     return metric_values
 
 
-def df_all_images(imgs, metrics, hyperparameters):
+def df_all_images(imgs, metrics):
     # Per-image pixel size from filename metadata (optional; adds nm columns)
     pixel_size_by_name= {}
     try:
@@ -77,20 +77,12 @@ def df_all_images(imgs, metrics, hyperparameters):
         # If metadata parsing fails, we just won't compute nm resolutions.
         pixel_size_by_name = {}
     
-    if torch.cuda.is_available():
-        device = "cuda"
-    else:
-        print("CUDA requested but not available; falling back to CPU.")
-        device = "cpu"
-    
-    hyperparameters["device"] = device
-    
     rows = []
     for img in imgs:
         try:
             print("Working on:", img.name)
     
-            row = compute_metrics_for_image(img, metrics, hyperparameters)
+            row = compute_metrics_for_image(img, metrics)
     
             px_nm = pixel_size_by_name.get(img.name, None)
             row["pixel_size_nm"] = px_nm
