@@ -1,0 +1,15 @@
+# dirs
+RadarPlot_ImgMetrics/img_dir
+RadarPlot_ImgMetrics/ref_dir
+RadarPlot_ImgMetrics/utils/__pycache__
+RadarPlot_ImgMetrics/.ipynb_checkpoints
+
+# imgs
+*.png
+*.jpg
+
+
+# data files
+*.csv
+*.xlsx
+*.pickle

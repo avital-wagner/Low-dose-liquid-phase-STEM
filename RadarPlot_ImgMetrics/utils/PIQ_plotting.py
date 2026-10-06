@@ -1,119 +1,9 @@
-# UTIL Functions for image metric calculation and radial plotting
+# Functions for radial plotting
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import torch
 
 from pathlib import Path
-from typing import Dict, List, Tuple
-from PIL import Image
-
-# OWN PACKAGE
-from utils.extract_metadata import extract_image_metadata
-
-def load_image(path: Path) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Returns:
-      rgb_float: HxWx3 float32 in [0,1]
-      alpha_mask: HxW bool mask of valid pixels (True=valid), derived from alpha if present.
-                 If no alpha channel, returns all-True mask.
-    """
-    im = Image.open(path)
-    im_np = np.array(im)
-
-    if im_np.ndim == 2:
-        rgb = np.stack([im_np, im_np, im_np], axis=-1)
-        alpha_mask = np.ones(im_np.shape, dtype=bool)
-    else:
-        if im_np.shape[2] == 4:
-            rgb = im_np[:, :, :3]
-            alpha = im_np[:, :, 3]
-            alpha_mask = alpha > 0
-        else:
-            rgb = im_np[:, :, :3]
-            alpha_mask = np.ones(im_np.shape[:2], dtype=bool)
-
-    rgb = rgb.astype(np.float32)
-
-    if np.issubdtype(im_np.dtype, np.integer):
-        rgb_float = rgb / float(np.iinfo(im_np.dtype).max)
-    else:
-        mx = float(rgb.max()) if rgb.size else 1.0
-        rgb_float = rgb / mx if mx > 1.0 else rgb
-
-    return rgb_float.astype(np.float32), alpha_mask
-
-
-def compute_metrics_for_image(path, metrics, hyperparameters):
-    metric_values = {}
-    
-    rgb_float, _ = load_image(path)
-
-    # loop over metric objects and compute their corresponding values
-    # hyperparameters are individually extracted
-    for metric in metrics:
-        print("Calculating", metric.name())
-
-        dict_values = metric.compute(rgb_float, **hyperparameters)
-
-        # add metric + value to dict
-        metric_values.update(dict_values)
-
-    return metric_values
-
-
-def df_all_images(imgs, metrics, hyperparameters):
-    # Per-image pixel size from filename metadata (optional; adds nm columns)
-    pixel_size_by_name= {}
-    try:
-        metadata_list = extract_image_metadata(imgs)
-        for m in metadata_list:
-            px = float(m.get("pixel"))
-            pth = m.get("path")
-            name = Path(pth).name if pth is not None else None
-            if name is not None:
-                pixel_size_by_name[name] = px
-    except Exception:
-        # If metadata parsing fails, we just won't compute nm resolutions.
-        pixel_size_by_name = {}
-    
-    if torch.cuda.is_available():
-        device = "cuda"
-    else:
-        print("CUDA requested but not available; falling back to CPU.")
-        device = "cpu"
-    
-    hyperparameters["device"] = device
-    
-    rows = []
-    for img in imgs:
-        try:
-            print("Working on:", img.name)
-    
-            row = compute_metrics_for_image(img, metrics, hyperparameters)
-    
-            px_nm = pixel_size_by_name.get(img.name, None)
-            row["pixel_size_nm"] = px_nm
-    
-            if px_nm is not None:
-                if "res_ampl_px" in row and row["res_ampl_px"] is not None:
-                    row["res_ampl_nm"] = row["res_ampl_px"] * px_nm
-                if "res_pwr_px" in row and row["res_pwr_px"] is not None:
-                    row["res_pwr_nm"] = row["res_pwr_px"] * px_nm
-    
-            row["image"] = img
-            rows.append(row)
-    
-            print("Done with:", img.name)
-        
-        except Exception as e:
-            print("Issue with", img.name, "-", e)
-            rows.append({"image": img.name, "error": str(e)})
-    
-    df = pd.DataFrame(rows)
-
-    return df
-
 
 def radar_polygon_area(values):
     """
@@ -146,7 +36,7 @@ def radar_polygon_area(values):
     return float(raw_area / max_area)
 
     
-def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_index=0):
+def make_radar_plot(csv_path, output_path=None, individual_dir=None, image_col="image", range_row_index=0):
     csv_path = Path(csv_path)
     df = pd.read_csv(csv_path)
 
@@ -161,6 +51,13 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
     else:
         output_path = Path(output_path)
 
+    if individual_dir is None:
+        individual_dir = output_path.parent / "individual_radars"
+    else:
+        individual_dir = Path(individual_dir)
+
+    individual_dir.mkdir(parents=True, exist_ok=True)
+
     range_row = df.iloc[range_row_index]
 
     metric_cols = []
@@ -174,7 +71,7 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
         if spec.lower() in ["nan", "", "none"]:
             continue
 
-        if "-" not in spec:
+        if ":" not in spec:
             continue
 
         metric_cols.append(c)
@@ -183,7 +80,7 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
 
     for metric in metric_cols:
         spec = str(range_row[metric]).strip()
-        axis_start, axis_end = spec.split("-")
+        axis_start, axis_end = spec.split(":")
         axis_ranges[metric] = (float(axis_start), float(axis_end))
 
     sample_df = df.drop(index=df.index[range_row_index]).reset_index(drop=True)
@@ -192,18 +89,22 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
     angles = np.linspace(0, 2 * np.pi, len(labels), endpoint=False)
     angles_closed = np.r_[angles, angles[0]]
 
+    plt.rcParams["font.family"] = "Arial"
+
+    # -------------------------
+    # Combined plot
+    # -------------------------
     fig, ax = plt.subplots(
         figsize=(9, 8),
         subplot_kw={"projection": "polar"},
     )
-    
-    plt.rcParams["font.family"] = "Arial"
 
     ax.set_theta_offset(np.pi / 2)
     ax.set_theta_direction(-1)
 
     for _, row in sample_df.iterrows():
         values = []
+        raw_values = []
 
         for metric in metric_cols:
             raw = pd.to_numeric(row[metric], errors="coerce")
@@ -223,6 +124,7 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
             radial_value = float(np.clip(radial_value, 0, 1))
 
             values.append(radial_value)
+            raw_values.append(raw)
 
         values = np.array(values, dtype=float)
 
@@ -235,6 +137,7 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
         area_score = radar_polygon_area(values)
         label = f"{Path(str(row[image_col])).stem}  A={area_score:.2f}"
 
+        # Add to combined plot
         ax.plot(
             angles_closed,
             values_closed,
@@ -250,6 +153,77 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
             alpha=0.08,
         )
 
+        # -------------------------
+        # Individual plot
+        # -------------------------
+        fig_ind, ax_ind = plt.subplots(
+            figsize=(9, 8),
+            subplot_kw={"projection": "polar"},
+        )
+
+        ax_ind.set_theta_offset(np.pi / 2)
+        ax_ind.set_theta_direction(-1)
+
+        ax_ind.plot(
+            angles_closed,
+            values_closed,
+            linewidth=2,
+            marker="o",
+            markersize=4,
+        )
+
+        ax_ind.fill(
+            angles_closed,
+            values_closed,
+            alpha=0.08,
+        )
+
+        ax_ind.set_ylim(0, 1)
+
+        ax_ind.set_xticks(angles)
+        ax_ind.set_xticklabels(labels, fontsize=16)
+
+        ax_ind.set_yticks([0.25, 0.50, 0.75, 1.00])
+        ax_ind.set_yticklabels(
+            ["25", "50", "75", "100"],
+            fontsize=16,
+        )
+
+        ax_ind.grid(True, linewidth=1.1, alpha=0.45)
+        ax_ind.spines["polar"].set_alpha(0.35)
+
+        # Add raw values next to the points
+        for angle, r, raw in zip(angles, values, raw_values):
+            ax_ind.text(
+                angle,
+                min(r - 0.10, 1.12),
+                f"{raw:.3g}",
+                ha="center",
+                va="center",
+                fontsize=14,
+            )
+
+        ax_ind.set_title(
+            f"{Path(str(row[image_col])).stem}  A={area_score:.2f}",
+            fontsize=14,
+            pad=25,
+        )
+
+        plt.tight_layout()
+
+        individual_path = individual_dir / (
+            f"{Path(str(row[image_col])).stem}_radar.png"
+        )
+
+        plt.savefig(
+            individual_path,
+            dpi=600,
+            bbox_inches="tight",
+        )
+
+        plt.close(fig_ind)
+
+    # Finish combined plot
     ax.set_ylim(0, 1)
 
     ax.set_xticks(angles)
@@ -260,12 +234,6 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
 
     ax.grid(True, linewidth=1.1, alpha=0.45)
     ax.spines["polar"].set_alpha(0.35)
-
-    ax.set_title(
-        "",
-        fontsize=14,
-        pad=25,
-    )
 
     ax.legend(
         loc="upper center",
@@ -278,5 +246,4 @@ def make_radar_plot(csv_path, output_path=None, image_col="image", range_row_ind
     plt.show()
 
     print(f"Saved combined radar plot to: {output_path}")
-
-    return output_path
+    print(f"Saved individual radar plots to: {individual_dir}")
