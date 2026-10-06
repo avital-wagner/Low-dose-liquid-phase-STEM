@@ -71,7 +71,7 @@ def make_radar_plot(csv_path, output_path=None, individual_dir=None, image_col="
         if spec.lower() in ["nan", "", "none"]:
             continue
 
-        if "-" not in spec:
+        if ":" not in spec:
             continue
 
         metric_cols.append(c)
@@ -80,7 +80,7 @@ def make_radar_plot(csv_path, output_path=None, individual_dir=None, image_col="
 
     for metric in metric_cols:
         spec = str(range_row[metric]).strip()
-        axis_start, axis_end = spec.split("-")
+        axis_start, axis_end = spec.split(":")
         axis_ranges[metric] = (float(axis_start), float(axis_end))
 
     sample_df = df.drop(index=df.index[range_row_index]).reset_index(drop=True)
