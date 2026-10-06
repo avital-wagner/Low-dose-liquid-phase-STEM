@@ -7,21 +7,29 @@ from pathlib import Path
 from scipy.ndimage import gaussian_filter, median_filter
 
 ## own files
-from utils.niqe import niqe as niqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
-from utils.piqe import piqe as piqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
-from utils.dom import DOM
+from niqe import niqe as niqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
+from piqe import piqe as piqe_fn          # expects gray uint8 (or BGR uint8; converts internally)
+from dom import DOM
 
 # MAIN METRIC CLASS
 class Metric():
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.need_ref_img = False # standard for IQA
 
     # abstract func
     def name(self):
         return "Non-specific metric."
 
-    # abstract func
+    # return dict of params used
+    def get_params(self):
+        return {}
+
+    # returns list of all metrics it returns, generally only self.name(), otherwise overwrite
+    def return_names(self):
+        return [self.name()]
+
+    # abstract func (EXPECTS AN RGB IMG - e.g. H x W x 3 - all other conversion done internally)
     def compute(self, img, **kwargs):
         return 0
 
@@ -47,7 +55,7 @@ class NiqeMetric(Metric):
     def name(self):
         return "NIQE"
 
-    def compute(self, img, **kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
         value = float(niqe_fn(self.to_uint8_gray(luma))) #convert to grayscale first
         return {self.name() : value}
@@ -61,7 +69,7 @@ class BrisqueMetric(Metric):
     def name(self):
         return "BRISQUE"
 
-    def compute(self, img, **kwargs):
+    def compute(self, img):
         try:
             with torch.no_grad():
                 x_rgb = torch.from_numpy(np.clip(img, 0.0, 1.0)).permute(2, 0, 1).unsqueeze(0)
@@ -81,7 +89,7 @@ class PiqeMetric(Metric):
     def name(self):
         return "PIQE"
 
-    def compute(self, img, **kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
         value = float(piqe_fn(self.to_uint8_gray(luma))) #convert to grayscale first
         return {self.name() : value}
@@ -91,9 +99,16 @@ class PiqeMetric(Metric):
 Total Variation
 """
 class TotalVarMetric(Metric):
+
+    def __init__(self, device, **kwargs):
+        super().__init__(**kwargs)
+        self.device = device
     
     def name(self):
         return "Total Variation"
+
+    def get_params(self):
+        return {"device" : self.device}
 
     def total_variation_l1(self, img_luma: torch.Tensor) -> torch.Tensor:
         """
@@ -104,9 +119,9 @@ class TotalVarMetric(Metric):
         dx = torch.abs(img_luma[:, :, :, 1:] - img_luma[:, :, :, :-1])
         return dx.mean() + dy.mean()
     
-    def compute(self, img, device, **kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
-        luma_t = torch.from_numpy(luma).unsqueeze(0).unsqueeze(0).to(device=device, dtype=torch.float32)
+        luma_t = torch.from_numpy(luma).unsqueeze(0).unsqueeze(0).to(device=self.device, dtype=torch.float32)
     
         with torch.no_grad():
             value = float(self.total_variation_l1(luma_t).item())
@@ -122,7 +137,7 @@ class DomMetric(Metric):
     def name(self):
         return "DOM"
 
-    def compute(self, img, **kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
         gray_u8 = self.to_uint8_gray(luma)
         value = float(DOM().get_sharpness(gray_u8))
@@ -134,31 +149,32 @@ Roughness Map (generally P90)
 """
 class RoughnessMetric(Metric):
 
-    def __init__(self):
-        super().__init__() 
-        self.percentile = None
+    def __init__(self, roughness_sigma, roughness_perc, **kwargs):
+        super().__init__(**kwargs) 
+        self.roughness_perc = roughness_perc
+        self.roughness_sigma = roughness_sigma
     
     def name(self):
-        if self.percentile is not None:
-            return "Roughness " + str(self.percentile)
-        return "Roughness"
+        return "Roughness " + str(self.roughness_perc)
 
-    def background_roughness_metrics(self, img, sigma = 1.0, percentile=0.90):
+    def get_params(self):
+        return {"percentile" : self.roughness_perc,
+                "sigma" : self.roughness_sigma}
+
+    def background_roughness_metrics(self, img):
         img = np.asarray(img, dtype=np.float32)
         gray = np.clip(img, 0.0, 1.0)
     
-        smooth = gaussian_filter(gray, sigma=sigma)
+        smooth = gaussian_filter(gray, sigma=self.roughness_sigma)
     
         hf = gray - smooth
         ahf = np.abs(hf)
 
-        self.percentile = percentile # save in metric to be used in self.name
-    
-        return float(np.percentile(ahf, self.percentile))
+        return float(np.percentile(ahf, self.roughness_perc))
 
-    def compute(self, img, roughness_sigma, roughness_perc, **kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
-        value = self.background_roughness_metrics(luma, sigma = roughness_sigma, percentile=roughness_perc)
+        value = self.background_roughness_metrics(luma)
         return {self.name() : value}
 
 
@@ -166,9 +182,18 @@ class RoughnessMetric(Metric):
 Salt & Pepper Noise (returns fraction)
 """
 class SaltPepperMetric(Metric):
+
+    def __init__(self, SP_window, SP_threshold, **kwargs):
+        super().__init__(**kwargs) 
+        self.SP_window = SP_window
+        self.SP_threshold = SP_threshold
     
     def name(self):
         return "Salt & Pepper Noise"
+
+    def get_params(self):
+        return {"window" : self.SP_window,
+                "threshold" : self.SP_threshold}
 
     def salt_pepper_metrics(self, img, window = 3, extreme_threshold=0.20):
         img = np.asarray(img, dtype=np.float32)
@@ -183,9 +208,9 @@ class SaltPepperMetric(Metric):
     
         return sp_fraction
 
-    def compute(self, img, SP_window, SP_threshold, **kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
-        value = self.salt_pepper_metrics(luma, window=SP_window, extreme_threshold=SP_threshold)
+        value = self.salt_pepper_metrics(luma, window=self.SP_window, extreme_threshold=self.SP_threshold)
         return {self.name() : value}
 
 
@@ -193,9 +218,24 @@ class SaltPepperMetric(Metric):
 Resolution from Fast Fourier Transform
 """
 class FFTMetric(Metric):
+
+    def __init__(self, nbins, tail_frac, exclude_zero_fft_pixels, **kwargs):
+        super().__init__() 
+        self.nbins = nbins
+        self.tail_frac = tail_frac
+        self.exclude_zero_fft_pixels = exclude_zero_fft_pixels
     
     def name(self):
         return "Resolution from FFT"
+
+    # FFT returns two metric values, so overwrite func
+    def return_names(self):
+        return ["res_ampl_px", "res_pwr_px"]
+
+    def get_params(self):
+        return {"nbins" : self.nbins,
+                "tail_frac" : self.tail_frac,
+                "exclude_zero_fft_pixels" : self.exclude_zero_fft_pixels}
 
     def radial_profile_rfft(self, spectrum, valid_fft_mask, nbins):
         """
@@ -303,10 +343,453 @@ class FFTMetric(Metric):
     
         return res_ampl_px, res_pwr_px
 
-    def compute(self, img, nbins, tail_frac, exclude_zero_fft_pixels,**kwargs):
+    def compute(self, img):
         luma = self.rgb_to_luma(img) 
-        res_ampl_px, res_pwr_px = self.fft_metrics_and_resolution(luma, nbins, tail_frac, exclude_zero_fft_pixels)
+        res_ampl_px, res_pwr_px = self.fft_metrics_and_resolution(luma, self.nbins, self.tail_frac, self.exclude_zero_fft_pixels)
         return {"res_ampl_px" : res_ampl_px, "res_pwr_px" : res_pwr_px}
+
+
+"""
+FFT correlation length
+"""
+
+class FFT_correlation_length(Metric):
+    
+    def __init__(self, nbins, exclude_zero_fft_pixels, **kwargs):
+        super().__init__() 
+        self.nbins = nbins
+        self.exclude_zero_fft_pixels = exclude_zero_fft_pixels
+    
+    def name(self):
+        return "FFT correlation length"
+        
+    def return_names(self):
+        return ["correlation_length_px"]
+
+    def get_params(self):
+        return {"nbins" : self.nbins,
+                "exclude_zero_fft_pixels" : self.exclude_zero_fft_pixels}
+
+    def radial_profile_rfft(self, spectrum, valid_fft_mask, nbins):
+        """
+        spectrum: H x (W//2+1) float (e.g., |F| or |F|^2)
+        valid_fft_mask: same shape bool; False = masked/excluded pixels
+        nbins: number of radial bins
+    
+        Returns:
+          bin_centers (cycles/pixel),
+          bin_means,
+          bin_counts (# contributing pixels)
+        """
+        H, Wr = spectrum.shape
+    
+        fy = np.fft.fftfreq(H)              # cycles/pixel
+        fx = np.fft.rfftfreq((Wr - 1) * 2)  # recover original W from rfft width
+    
+        FX, FY = np.meshgrid(fx, fy)
+        R = np.sqrt(FX**2 + FY**2)
+    
+        edges = np.linspace(0.0, float(R.max()), nbins + 1, dtype=np.float32)
+    
+        r_flat = R.ravel()
+        s_flat = spectrum.ravel()
+        m_flat = valid_fft_mask.ravel()
+    
+        bin_idx = np.searchsorted(edges, r_flat, side="right") - 1
+        bin_idx = np.clip(bin_idx, 0, nbins - 1)
+    
+        sums = np.zeros(nbins, dtype=np.float64)
+        counts = np.zeros(nbins, dtype=np.int64)
+    
+        valid = m_flat
+        np.add.at(sums, bin_idx[valid], s_flat[valid])
+        np.add.at(counts, bin_idx[valid], 1)
+    
+        means = np.full(nbins, np.nan, dtype=np.float64)
+        nz = counts > 0
+        means[nz] = sums[nz] / counts[nz]
+    
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        return centers.astype(np.float32), means.astype(np.float64), counts
+
+    def correlation_length(self, radii, profile, counts): 
+        #average size or spacing of structures in the image calculated when intensity has droped to 1/e of maximum
+
+        valid = (counts > 0) & np.isfinite(profile)
+    
+        if not np.any(valid):
+            return np.nan
+    
+        max_intensity = np.max(profile[valid])
+        threshold = max_intensity / np.e
+    
+        valid_idx = np.flatnonzero(valid)
+    
+        idx = valid_idx[
+            np.argmin(np.abs(profile[valid] - threshold))
+        ]
+    
+        frequency = float(radii[idx])
+    
+        if frequency <= 0:
+            return np.nan
+    
+        correlation_length = 1.0 / frequency
+    
+        return correlation_length
+
+    
+    def compute(self, img):
+        luma = self.rgb_to_luma(img)
+        
+        x = np.asarray(luma, dtype=np.float32)
+        F = np.fft.rfft2(x)
+        ampl = np.abs(F).astype(np.float64)
+        log_ampl = np.log1p(ampl)
+        
+        if self.exclude_zero_fft_pixels:
+            valid_fft = ampl > 0
+        else:
+            valid_fft = np.ones_like(ampl, dtype=bool)
+        
+        r, profile, counts = self.radial_profile_rfft(log_ampl, valid_fft, self.nbins)
+    
+        corr_length = self.correlation_length(r, profile, counts)
+        
+        return {"correlation_length_px": corr_length}
+
+"""
+FFT intergral 
+"""
+
+class FFT_integral(Metric):
+    
+    def __init__(self, nbins, exclude_zero_fft_pixels, **kwargs):
+        super().__init__() 
+        self.nbins = nbins
+        self.exclude_zero_fft_pixels = exclude_zero_fft_pixels
+    
+    def name(self):
+        return "FFT integral"
+    
+    def return_names(self):
+        return ["area_under_profile"]
+
+    def get_params(self):
+        return {"nbins" : self.nbins,
+                "exclude_zero_fft_pixels" : self.exclude_zero_fft_pixels}
+
+    def radial_profile_rfft(self, spectrum, valid_fft_mask, nbins):
+        """
+        spectrum: H x (W//2+1) float (e.g., |F| or |F|^2)
+        valid_fft_mask: same shape bool; False = masked/excluded pixels
+        nbins: number of radial bins
+    
+        Returns:
+          bin_centers (cycles/pixel),
+          bin_means,
+          bin_counts (# contributing pixels)
+        """
+        H, Wr = spectrum.shape
+    
+        fy = np.fft.fftfreq(H)              # cycles/pixel
+        fx = np.fft.rfftfreq((Wr - 1) * 2)  # recover original W from rfft width
+    
+        FX, FY = np.meshgrid(fx, fy)
+        R = np.sqrt(FX**2 + FY**2)
+    
+        edges = np.linspace(0.0, float(R.max()), nbins + 1, dtype=np.float32)
+    
+        r_flat = R.ravel()
+        s_flat = spectrum.ravel()
+        m_flat = valid_fft_mask.ravel()
+    
+        bin_idx = np.searchsorted(edges, r_flat, side="right") - 1
+        bin_idx = np.clip(bin_idx, 0, nbins - 1)
+    
+        sums = np.zeros(nbins, dtype=np.float64)
+        counts = np.zeros(nbins, dtype=np.int64)
+    
+        valid = m_flat
+        np.add.at(sums, bin_idx[valid], s_flat[valid])
+        np.add.at(counts, bin_idx[valid], 1)
+    
+        means = np.full(nbins, np.nan, dtype=np.float64)
+        nz = counts > 0
+        means[nz] = sums[nz] / counts[nz]
+    
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        return centers.astype(np.float32), means.astype(np.float64), counts
+
+    def area_under_profile(self, radii, profile, counts): #area under radial profile
+    
+        valid = (counts > 0) & np.isfinite(profile)
+    
+        if np.sum(valid) < 2:
+            return np.nan
+    
+        area = np.trapezoid(
+            profile[valid],
+            radii[valid]
+        )
+    
+        return float(area)
+        
+    def compute(self, img, **kwargs):
+        luma = self.rgb_to_luma(img)
+        
+        x = np.asarray(luma, dtype=np.float32)
+        F = np.fft.rfft2(x)
+        ampl = np.abs(F).astype(np.float64)
+        log_ampl = np.log1p(ampl)
+        
+        if self.exclude_zero_fft_pixels:
+            valid_fft = ampl > 0
+        else:
+            valid_fft = np.ones_like(ampl, dtype=bool)
+        
+        r, profile, counts = self.radial_profile_rfft(log_ampl, valid_fft, self.nbins)
+
+        area = self.area_under_profile(r, profile, counts)
+        
+        return {"area_under_profile": area}
+
+
+"""
+FFT Slope
+"""
+
+class FFT_slope(Metric):
+    
+    def __init__(self, nbins, exclude_zero_fft_pixels, **kwargs):
+        super().__init__() 
+        self.nbins = nbins
+        self.exclude_zero_fft_pixels = exclude_zero_fft_pixels
+    
+    def name(self):
+        return "FFT slope"
+        
+    def return_names(self):
+        return ["steepest_slope", "slope_frequency"]
+
+    def get_params(self):
+        return {"nbins" : self.nbins,
+                "exclude_zero_fft_pixels" : self.exclude_zero_fft_pixels}    
+
+    def radial_profile_rfft(self, spectrum, valid_fft_mask, nbins):
+        """
+        spectrum: H x (W//2+1) float (e.g., |F| or |F|^2)
+        valid_fft_mask: same shape bool; False = masked/excluded pixels
+        nbins: number of radial bins
+    
+        Returns:
+          bin_centers (cycles/pixel),
+          bin_means,
+          bin_counts (# contributing pixels)
+        """
+        H, Wr = spectrum.shape
+    
+        fy = np.fft.fftfreq(H)              # cycles/pixel
+        fx = np.fft.rfftfreq((Wr - 1) * 2)  # recover original W from rfft width
+    
+        FX, FY = np.meshgrid(fx, fy)
+        R = np.sqrt(FX**2 + FY**2)
+    
+        edges = np.linspace(0.0, float(R.max()), nbins + 1, dtype=np.float32)
+    
+        r_flat = R.ravel()
+        s_flat = spectrum.ravel()
+        m_flat = valid_fft_mask.ravel()
+    
+        bin_idx = np.searchsorted(edges, r_flat, side="right") - 1
+        bin_idx = np.clip(bin_idx, 0, nbins - 1)
+    
+        sums = np.zeros(nbins, dtype=np.float64)
+        counts = np.zeros(nbins, dtype=np.int64)
+    
+        valid = m_flat
+        np.add.at(sums, bin_idx[valid], s_flat[valid])
+        np.add.at(counts, bin_idx[valid], 1)
+    
+        means = np.full(nbins, np.nan, dtype=np.float64)
+        nz = counts > 0
+        means[nz] = sums[nz] / counts[nz]
+    
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        return centers.astype(np.float32), means.astype(np.float64), counts
+
+    def slope(self, radii, profile, counts): #calculates the slope of radial profile, returns the steepest slope
+
+        # Make sure everything is a NumPy array
+        radii = np.asarray(radii, dtype=np.float64)
+        profile = np.asarray(profile, dtype=np.float64)
+        counts = np.asarray(counts)
+    
+        valid = (counts > 0) & np.isfinite(profile)
+    
+        x = radii[valid]
+        y = profile[valid]
+    
+        if len(x) < 3:
+            return np.array([]), np.nan, np.nan
+    
+        # First derivative
+        slope = np.gradient(y, x)
+    
+        # Steepest downward slope
+        idx = np.argmin(slope)
+    
+        steepest = float(slope[idx])
+        frequency = float(x[idx])
+    
+        return slope, steepest, frequency
+
+    def compute(self, img):
+        luma = self.rgb_to_luma(img)
+        
+        x = np.asarray(luma, dtype=np.float32)
+        F = np.fft.rfft2(x)
+        ampl = np.abs(F).astype(np.float64)
+        log_ampl = np.log1p(ampl)
+        
+        if self.exclude_zero_fft_pixels:
+            valid_fft = ampl > 0
+        else:
+            valid_fft = np.ones_like(ampl, dtype=bool)
+        
+        r, profile, counts = self.radial_profile_rfft(log_ampl, valid_fft, self.nbins)
+    
+        slope, steepest_slope, slope_frequency = self.slope(r, profile, counts)
+        
+        return {"steepest_slope": steepest_slope, "slope_frequency": slope_frequency}
+        
+        
+"""
+FFT second derivative
+"""
+
+class FFT_second_der(Metric):
+    
+    def __init__(self, nbins, exclude_zero_fft_pixels, **kwargs):
+        super().__init__() 
+        self.nbins = nbins
+        self.exclude_zero_fft_pixels = exclude_zero_fft_pixels
+    
+    def name(self):
+        return "FFT second derivative"
+        
+    def return_names(self):
+        return ["zero_frequency", "second_at_slope"]
+
+    def get_params(self):
+        return {"nbins" : self.nbins,
+                "exclude_zero_fft_pixels" : self.exclude_zero_fft_pixels}
+
+    def radial_profile_rfft(self, spectrum, valid_fft_mask, nbins):
+        """
+        spectrum: H x (W//2+1) float (e.g., |F| or |F|^2)
+        valid_fft_mask: same shape bool; False = masked/excluded pixels
+        nbins: number of radial bins
+    
+        Returns:
+          bin_centers (cycles/pixel),
+          bin_means,
+          bin_counts (# contributing pixels)
+        """
+        H, Wr = spectrum.shape
+    
+        fy = np.fft.fftfreq(H)              # cycles/pixel
+        fx = np.fft.rfftfreq((Wr - 1) * 2)  # recover original W from rfft width
+    
+        FX, FY = np.meshgrid(fx, fy)
+        R = np.sqrt(FX**2 + FY**2)
+    
+        edges = np.linspace(0.0, float(R.max()), nbins + 1, dtype=np.float32)
+    
+        r_flat = R.ravel()
+        s_flat = spectrum.ravel()
+        m_flat = valid_fft_mask.ravel()
+    
+        bin_idx = np.searchsorted(edges, r_flat, side="right") - 1
+        bin_idx = np.clip(bin_idx, 0, nbins - 1)
+    
+        sums = np.zeros(nbins, dtype=np.float64)
+        counts = np.zeros(nbins, dtype=np.int64)
+    
+        valid = m_flat
+        np.add.at(sums, bin_idx[valid], s_flat[valid])
+        np.add.at(counts, bin_idx[valid], 1)
+    
+        means = np.full(nbins, np.nan, dtype=np.float64)
+        nz = counts > 0
+        means[nz] = sums[nz] / counts[nz]
+    
+        centers = 0.5 * (edges[:-1] + edges[1:])
+        return centers.astype(np.float32), means.astype(np.float64), counts
+        
+    def second_derivative(self, radii, profile, counts): # second derivative of radial profile, resturns also frequency at which the second derivative is zero
+    
+        # Make sure everything is a NumPy array
+        radii = np.asarray(radii, dtype=np.float64)
+        profile = np.asarray(profile, dtype=np.float64)
+        counts = np.asarray(counts)
+    
+        valid = (counts > 0) & np.isfinite(profile)
+    
+        x = radii[valid]
+        y = profile[valid]
+    
+        if len(x) < 4:
+            return np.array([]), np.nan, np.nan
+    
+        # First derivative
+        first = np.gradient(y, x)
+    
+        # Second derivative
+        second = np.gradient(first, x)
+    
+        # Position of steepest downward slope
+        slope_idx = np.argmin(first)
+    
+        second_at_slope = float(second[slope_idx])
+    
+        # Find where second derivative changes sign
+        crossings = np.flatnonzero(
+            np.diff(np.sign(second)) != 0
+        )
+    
+        if crossings.size == 0:
+            return second, np.nan, second_at_slope
+    
+        # Zero crossing nearest the steepest slope
+        idx = crossings[
+            np.argmin(np.abs(crossings - slope_idx))
+        ]
+    
+        zero_frequency = float(
+            (x[idx] + x[idx + 1]) / 2
+        )
+    
+        return second, zero_frequency, second_at_slope
+    
+    def compute(self, img):
+        luma = self.rgb_to_luma(img)
+
+        x = np.asarray(luma, dtype=np.float32)
+        F = np.fft.rfft2(x)
+        ampl = np.abs(F).astype(np.float64)
+        log_ampl = np.log1p(ampl)
+        
+        if self.exclude_zero_fft_pixels:
+            valid_fft = ampl > 0
+        else:
+            valid_fft = np.ones_like(ampl, dtype=bool)
+        
+        r, profile, counts = self.radial_profile_rfft(log_ampl, valid_fft, self.nbins)
+
+        second, zero_frequency, second_at_slope = self.second_derivative(r, profile, counts)
+        
+        return {"zero_frequency": zero_frequency, "second_at_slope": second_at_slope}
 
 
 """
@@ -314,7 +797,8 @@ Structural Similarity Index Measure with (masked) Reference Image
 """
 class SSIMMetric(Metric):
 
-    def __init__(self):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.need_ref_img = True # override the main Metric() class
     
     def set_ref(self, ref_img):
@@ -430,6 +914,6 @@ class SSIMMetric(Metric):
         ssim_value = (ssim_map * wsum).sum() / wsum.sum()
         return float(ssim_value.item())
 
-    def compute(self, img, **kwargs):
+    def compute(self, img):
         value = self.masked_ssim_from_images(img)
         return {self.name() : value}
