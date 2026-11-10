@@ -326,7 +326,7 @@ def save_all(dir_name, bpfa, metrics, tracker, best_recon, best_dict):
     save_metrics(save_dir, bpfa, metrics)
     save_atomscores(save_dir, bpfa)
     save_parameters(save_dir, tracker)
-    save_best(save_dir, best_recon, best_dict)
+    save_best(save_dir, best_recon, best_dict, bpfa)
 
     # confirm save went well
     print("Everything was neatly saved in dir:", save_dir)
@@ -382,14 +382,14 @@ def save_parameters(dir_name, tracker):
     fig.savefig(path)
     plt.close(fig)
     
-def save_best(dir_name, best_recon, best_dict):
+def save_best(dir_name, best_recon, best_dict, bpfa):
     if best_recon is None or best_dict is None:
         print("Residual was never calculated, so no best dictionary or reconstruction or saved.")
         return
 
     # get dict params
     K = best_dict.shape[1]
-    patch_shape = (int(np.sqrt(best_dict.shape[0])), int(np.sqrt(best_dict.shape[0])))  # assumes square patches
+    patch_shape = (bpfa.patch_shape[0], bpfa.patch_shape[1])  # now works for non-square patches
 
     # save dict as pkl
     f_name_pkl = "best_dictionary_pickle_K" + str(K) + ".pkl"
