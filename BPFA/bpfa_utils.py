@@ -459,7 +459,7 @@ def perform_reconstruction(bpfa, input_array, mask_array, controls, metrics = []
             # show dictionary
             gallery = bpfa.gallery(padding=1)
             imshow(gallery, "Dictionary", scale=scale_dict)
-            controls.attach_dictionary_click("Dictionary")
+            controls.attach_dictionary_click("Dictionary", scale=scale_dict)
         
             if not controls.pause.value:
 
