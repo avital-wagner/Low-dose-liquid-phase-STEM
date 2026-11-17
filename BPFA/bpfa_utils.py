@@ -327,6 +327,7 @@ def save_all(dir_name, bpfa, metrics, tracker, best_recon, best_dict):
     save_atomscores(save_dir, bpfa)
     save_parameters(save_dir, tracker)
     save_best(save_dir, best_recon, best_dict, bpfa)
+    save_weights(save_dir, bpfa)
 
     # confirm save went well
     print("Everything was neatly saved in dir:", save_dir)
@@ -381,6 +382,15 @@ def save_parameters(dir_name, tracker):
     fig = plot_parameters(tracker)
     fig.savefig(path)
     plt.close(fig)
+
+def save_weights(dir_name, bpfa):
+    fullW = bpfa.fullW.to_ndarray()
+    
+    f_name = "weights.pkl"
+    path = os.path.join(dir_name, f_name)
+
+    with open(path, "wb") as f:
+        pickle.dump(fullW, f)
     
 def save_best(dir_name, best_recon, best_dict, bpfa):
     if best_recon is None or best_dict is None:
@@ -390,7 +400,7 @@ def save_best(dir_name, best_recon, best_dict, bpfa):
     # get dict params
     K = best_dict.shape[1]
     patch_shape = (bpfa.patch_shape[0], bpfa.patch_shape[1])  # now works for non-square patches
-
+    
     # save dict as pkl
     f_name_pkl = "best_dictionary_pickle_K" + str(K) + ".pkl"
     path_pkl = os.path.join(dir_name, f_name_pkl)
